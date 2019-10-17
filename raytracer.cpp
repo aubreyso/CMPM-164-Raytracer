@@ -100,6 +100,12 @@ public:
 //    else return background color
 #define MAX_RAY_DEPTH 5  // max recursion depth
 
+// helper function for trace to mix color values
+float mix(const float &a, const float &b, const float &mix)
+{
+   return b * mix + a * (1 - mix);
+}
+// main trace function
 Vec3f trace(
    const Vec3f &rayorig,
    const Vec3f &raydir,
@@ -140,15 +146,34 @@ Vec3f trace(
    }
 
    // REFLECTIVE/TRANSPARENT OBJECTS
-   if ((sphere->transparency > 0 || sphere->reflection > 0) && depth < MAX_RAY_DEPTH) {
-      
+   if ((sphere->transparency > 0 || sphere->reflection > 0) && depth < MAX_RAY_DEPTH)
+   {
+      // fresnel test
+      float facingratio = -raydir.dot(nhit);
+      float fresnelEffect = mix(pow(1 - facingratio, 3), 1, 0.8);
+
+      // reflective
       Vec3f reflectVector = raydir - nhit * 2 * raydir.dot(nhit); // compute reflection direction (primary ref. over normal)
       reflectVector.normalize();                                  // normalize reflection vector
-      Vec3f reflection = trace(phit + nhit * bias, reflectVector, spheres, depth + 1); // recursively trace from hit point
+      Vec3f reflectionColor = trace(phit + nhit * bias, reflectVector, spheres, depth + 1); // recursively trace from hit point
       
-      surfaceColor = (reflection * sphere->surfaceColor);
+      // refraction
+      Vec3f refractionColor = 0;
+      if (sphere->transparency) {
+         // COPY
+         float ior = 1.1, eta = (inside) ? ior : 1 / ior; // are we inside or outside the surface?
+         float cosi = -nhit.dot(raydir);
+         float k = 1 - eta * eta * (1 - cosi * cosi);
 
+         Vec3f refractVector = raydir * eta + nhit * (eta *  cosi - sqrt(k));
+         refractVector.normalize();
+         refractionColor = trace(phit - nhit * bias, refractVector, spheres, depth + 1);
+         // END COPY
+      }
 
+      // add apply values to surface color
+      //surfaceColor = (reflectionColor * sphere->surfaceColor);
+      surfaceColor = reflectionColor * fresnelEffect + refractionColor * (1 - fresnelEffect) * sphere->transparency * sphere->surfaceColor;
    }
 
    // MAT OBJECTS (PHONG SHADING)
@@ -268,7 +293,11 @@ int main(int argc, char **argv)
    spheres.push_back(Sphere(Vec3f( -5.0, -0.4, -26),     2.6, Vec3f(1.0, 0.46, 0.0), 0, 0.0));
 
    // moon
-   spheres.push_back(Sphere(Vec3f(  4.5,  5, -30),       3, Vec3f(0.6, 0.6, 0.6), 1, 0.0));
+   spheres.push_back(Sphere(Vec3f(  4.5,  5, -30),       3, Vec3f(0.6, 0.6, 0.6), 1, 0.2));
+
+   // ghosts
+   spheres.push_back(Sphere(Vec3f(  2.2,  -1, -10),       1.5, Vec3f(0.0, 0.9, 1), 0, 1));
+   spheres.push_back(Sphere(Vec3f(  -2,  2.6, -10),       1.5, Vec3f(0.0, 0.9, 1), 0, 1));
 
    // lights
    spheres.push_back(Sphere(Vec3f( 5.0,     15, 0),     3, Vec3f(0.00, 0.00, 0.00), 0, 0.0, Vec3f(1.5)));
