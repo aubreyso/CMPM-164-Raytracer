@@ -91,12 +91,15 @@ public:
 
 
 
+
 // TRACE FUNCTION
 // 1. takes ray as arg, checks if it intersects w/ any geometry
 // 2. if any intersection
 //       a. compute intersection point, normal @ intersection, and shade point
 //       b. return color for point
 //    else return background color
+#define MAX_RAY_DEPTH 5  // max recursion depth
+
 Vec3f trace(
    const Vec3f &rayorig,
    const Vec3f &raydir,
@@ -136,40 +139,54 @@ Vec3f trace(
       inside = true;             // set inside to true
    }
 
-   // MAT OBJECTS (PHONG SHADING)
-   // iterate through list of spheres
-   for (unsigned i = 0; i < spheres.size(); ++i) {
-      // if current sphere is a light source
-      if (spheres[i].emissionColor.x > 0) {
-         Vec3f transmission = 1;                            // "power" of light on current pixel (affects occluded)
-         Vec3f lightDirection = spheres[i].center - phit;   // get direction of light to point hit
-         lightDirection.normalize();                        // normalize this "ray"
+   // REFLECTIVE/TRANSPARENT OBJECTS
+   if ((sphere->transparency > 0 || sphere->reflection > 0) && depth < MAX_RAY_DEPTH) {
+      
+      Vec3f reflectVector = raydir - nhit * 2 * raydir.dot(nhit); // compute reflection direction (primary ref. over normal)
+      reflectVector.normalize();                                  // normalize reflection vector
+      Vec3f reflection = trace(phit + nhit * bias, reflectVector, spheres, depth + 1); // recursively trace from hit point
+      
+      surfaceColor = (reflection * sphere->surfaceColor);
 
-         // check all other spheres
-         for (unsigned j = 0; j < spheres.size(); ++j) {
-            // skip if same sphere
-            if (i != j) {
-               float t0, t1;
-               // cast a ray from point to light source
-               // if intersect returns true (we hit another sphere on the way), this point is in shadow
-               // decrease transmission
-               if (spheres[j].intersect(phit + nhit * bias, lightDirection, t0, t1)) {
-                  transmission = 0.3;     // 0 for full dark shadows; floats for partial
-                  break;
+
+   }
+
+   // MAT OBJECTS (PHONG SHADING)
+   else {
+      // iterate through list of spheres
+      for (unsigned i = 0; i < spheres.size(); ++i) {
+         // if current sphere is a light source
+         if (spheres[i].emissionColor.x > 0) {
+            Vec3f transmission = 1;                            // "power" of light on current pixel (affects occluded)
+            Vec3f lightDirection = spheres[i].center - phit;   // get direction of light to point hit
+            lightDirection.normalize();                        // normalize this "ray"
+
+            // check all other spheres
+            for (unsigned j = 0; j < spheres.size(); ++j) {
+               // skip if same sphere
+               if (i != j) {
+                  float t0, t1;
+                  // cast a ray from point to light source
+                  // if intersect returns true (we hit another sphere on the way), this point is in shadow
+                  // decrease transmission
+                  if (spheres[j].intersect(phit + nhit * bias, lightDirection, t0, t1)) {
+                     transmission = 0.3;     // 0 for full dark shadows; floats for partial
+                     break;
+                  }
                }
             }
+            // diffuse contribution
+            float diffuse = std::max(float(0), nhit.dot(lightDirection));
+
+            // specular contribution
+            Vec3f reflectVector = nhit * 2 * nhit.dot(lightDirection) - lightDirection;               // compute reflect vector
+            float specularExponent = 25;                                                              // reflectfactor (tbd)
+            float specular = powf(std::max(float(0), -reflectVector.dot(raydir)), specularExponent);  // specular formula
+
+            // apply values to surface color
+            surfaceColor += sphere->surfaceColor * transmission * diffuse * spheres[i].emissionColor; // diffuse
+            surfaceColor += specular;                                                                 // specular
          }
-         // diffuse contribution
-         float diffuse = std::max(float(0), nhit.dot(lightDirection));
-
-         // specular contribution
-         Vec3f reflectVector = nhit * 2 * nhit.dot(lightDirection) - lightDirection;               // compute reflect vector
-         float specularExponent = 25;                                                              // reflectfactor (tbd)
-         float specular = powf(std::max(float(0), -reflectVector.dot(raydir)), specularExponent);  // specular formula
-
-         // apply values to surface color
-         surfaceColor += sphere->surfaceColor * transmission * diffuse * spheres[i].emissionColor; // diffuse
-         surfaceColor += specular;                                                                 // specular
       }
    }
    return surfaceColor + sphere->emissionColor;
@@ -245,18 +262,17 @@ int main(int argc, char **argv)
    
    // floor
    spheres.push_back(Sphere(Vec3f( 0.0, -10004, -20), 10000, Vec3f(0.33, 0.58, 0.0), 0, 0.0));
-   //spheres.push_back(Sphere(Vec3f( 0.0, -10004, -20), 10000, Vec3f(0.20, 0.20, 0.20), 0, 0.0));
 
-   // spheres
-   spheres.push_back(Sphere(Vec3f(  1.8,  0.0, -20),       3, Vec3f(1.0, 0.46, 0.0), 0, 0.0));
-   spheres.push_back(Sphere(Vec3f( -3.2, -0.4, -26),     2.6, Vec3f(1.0, 0.46, 0.0), 0, 0.0));
-   //spheres.push_back(Sphere(Vec3f( 0.0,      0, -20),     3, Vec3f(1.00, 0.32, 0.36), 0, 0.0));
-   //spheres.push_back(Sphere(Vec3f( -5,      0, -26),     3, Vec3f(0.32, 1.00, 0.36), 0, 0.0));
-  
+   // pumpkins
+   spheres.push_back(Sphere(Vec3f(  0,  0.0, -20),       3, Vec3f(1.0, 0.46, 0.0), 0, 0.0));
+   spheres.push_back(Sphere(Vec3f( -5.0, -0.4, -26),     2.6, Vec3f(1.0, 0.46, 0.0), 0, 0.0));
+
+   // moon
+   spheres.push_back(Sphere(Vec3f(  4.5,  5, -30),       3, Vec3f(0.6, 0.6, 0.6), 1, 0.0));
+
    // lights
    spheres.push_back(Sphere(Vec3f( 5.0,     15, 0),     3, Vec3f(0.00, 0.00, 0.00), 0, 0.0, Vec3f(1.5)));
    spheres.push_back(Sphere(Vec3f(-25.0,     20, 0),     3, Vec3f(0.00, 0.00, 0.00), 0, 0.0, Vec3f(0.4)));
-   //spheres.push_back(Sphere(Vec3f( 0.0,     20, -30),     3, Vec3f(0.00, 0.00, 0.00), 0, 0.0, Vec3f(3)));
 
    // render
    render(spheres);
